@@ -542,10 +542,10 @@ class OpenVLAForActionPrediction(PrismaticForConditionalGeneration):
         """Thin wrapper around .generate() that decodes predicted actions and unnormalizes them."""
         # If the special empty token ('') does not already appear after the colon (':') token in the prompt
         # (after "OUT:" or "ASSISTANT:"), insert it to match the inputs seen at training time
-        if not torch.all(input_ids[:, -1] == 29871):
-            input_ids = torch.cat(
-                (input_ids, torch.unsqueeze(torch.Tensor([29871]).long(), dim=0).to(input_ids.device)), dim=1
-            )
+        # if not torch.all(input_ids[:, -1] == 29871):
+        #     input_ids = torch.cat(
+        #         (input_ids, torch.unsqueeze(torch.Tensor([29871]).long(), dim=0).to(input_ids.device)), dim=1
+        #     )
 
         # Run VLA inference
         output = self.generate(input_ids, min_new_tokens=4, max_new_tokens=4, return_dict_in_generate=True, output_hidden_states=True, **kwargs)
@@ -583,7 +583,7 @@ class OpenVLAForActionPrediction(PrismaticForConditionalGeneration):
             f"The `unnorm_key` you chose is not in the set of available dataset statistics, "
             f"please choose from: {norm_stats.keys()}"
         )
-        return unnorm_key
+        return unnorm_key  
 
     def get_action_dim(self, unnorm_key: Optional[str] = None) -> int:
         """Get the dimensionality of the policy's action space."""

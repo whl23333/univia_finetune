@@ -42,7 +42,7 @@ def get_vla(cfg):
 
     vla = AutoModelForVision2Seq.from_pretrained(
         cfg.pretrained_checkpoint,
-        attn_implementation="flash_attention_2",
+        attn_implementation="eager",
         torch_dtype=torch.bfloat16,
         load_in_8bit=cfg.load_in_8bit,
         load_in_4bit=cfg.load_in_4bit,
@@ -219,3 +219,117 @@ def get_vla_latent_action(vla, processor, base_vla_name, obs, task_label, unnorm
     action = vla.predict_latent_action(**inputs, unnorm_key=unnorm_key, do_sample=True, temperature=0.75, top_p = 0.9)
 
     return action
+
+
+def extract_encoder_embeddings(vla, processor, base_vla_name, obs, task_label, center_crop=False):
+    """Extract text and image encoder embeddings using current model and processor.
+
+    Returns:
+        dict with keys:
+          - input_ids, attention_mask
+          - image_hidden_states: vision encoder sequence features (B, N_img, D) if available
+          - image_projected_features: projected vision features if projector exists
+          - text_hidden_states: language model last hidden states (B, N_txt, D) if available
+    """
+    # Prepare image
+    image = Image.fromarray(obs["full_image"]) if isinstance(obs.get("full_image"), np.ndarray) else obs["full_image"]
+    image = image.convert("RGB")
+
+    if center_crop:
+        batch_size = 1
+        crop_scale = 0.9
+        image_tf = tf.convert_to_tensor(np.array(image))
+        orig_dtype = image_tf.dtype
+        image_tf = tf.image.convert_image_dtype(image_tf, tf.float32)
+        image_tf = crop_and_resize(image_tf, crop_scale, batch_size)
+        image_tf = tf.clip_by_value(image_tf, 0, 1)
+        image_tf = tf.image.convert_image_dtype(image_tf, orig_dtype, saturate=True)
+        image = Image.fromarray(image_tf.numpy()).convert("RGB")
+
+    # Build prompt similar to get_vla_action
+    if "openvla-v01" in base_vla_name:
+        prompt = (
+            f"{OPENVLA_V01_SYSTEM_PROMPT} USER: What action should the robot take to {task_label.lower()}? ASSISTANT:"
+        )
+    else:
+        prompt = f"In: What action should the robot take to {task_label.lower()}?\nOut:"
+
+    # Processor to get tensors
+    inputs = processor(prompt, image)
+    device = getattr(vla, 'device', DEVICE)
+    pixel_values = inputs.get("pixel_values")
+    input_ids = inputs.get("input_ids")
+    attention_mask = inputs.get("attention_mask")
+    if pixel_values is not None:
+        pixel_values = pixel_values.to(device, dtype=torch.bfloat16)
+    if input_ids is not None:
+        input_ids = input_ids.to(device)
+    if attention_mask is not None:
+        attention_mask = attention_mask.to(device)
+
+    out = {
+        "input_ids": input_ids,
+        "attention_mask": attention_mask,
+        "image_hidden_states": None,
+        "image_projected_features": None,
+        "text_hidden_states": None,
+    }
+
+    with torch.no_grad():
+        # Image encoder
+        img_hidden = None
+        if pixel_values is not None:
+            if hasattr(vla, "vision_model"):
+                try:
+                    iv = vla.vision_model(pixel_values=pixel_values, output_hidden_states=True)
+                    img_hidden = getattr(iv, "last_hidden_state", None) or (iv[0] if isinstance(iv, (tuple, list)) else None)
+                except Exception:
+                    pass
+            if img_hidden is None and hasattr(vla, "vision_tower"):
+                try:
+                    iv = vla.vision_tower(pixel_values)
+                    img_hidden = getattr(iv, "last_hidden_state", None) or (iv[0] if isinstance(iv, (tuple, list)) else iv)
+                except Exception:
+                    pass
+            if img_hidden is None and hasattr(vla, "get_image_features"):
+                try:
+                    img_hidden = vla.get_image_features(pixel_values=pixel_values)
+                except Exception:
+                    pass
+
+        out["image_hidden_states"] = img_hidden
+
+        projector = None
+        for name in ["vision_projector", "mm_projector", "multi_modal_projector", "visual_projector"]:
+            if hasattr(vla, name):
+                projector = getattr(vla, name)
+                break
+        if projector is not None and isinstance(img_hidden, torch.Tensor):
+            try:
+                out["image_projected_features"] = projector(img_hidden)
+            except Exception:
+                pass
+
+        # Text encoder
+        txt_hidden = None
+        txt_mod = None
+        for name in ["language_model", "text_model", "lm"]:
+            if hasattr(vla, name):
+                txt_mod = getattr(vla, name)
+                break
+        if txt_mod is not None and input_ids is not None:
+            try:
+                core = getattr(txt_mod, "model", txt_mod)
+                tout = core(input_ids=input_ids, attention_mask=attention_mask, output_hidden_states=True, use_cache=False)
+                txt_hidden = getattr(tout, "last_hidden_state", None) or (tout[0] if isinstance(tout, (tuple, list)) else None)
+            except Exception:
+                try:
+                    embed_tokens = getattr(getattr(txt_mod, "model", txt_mod), "embed_tokens", None)
+                    if embed_tokens is not None:
+                        txt_hidden = embed_tokens(input_ids)
+                except Exception:
+                    pass
+
+        out["text_hidden_states"] = txt_hidden
+
+    return out

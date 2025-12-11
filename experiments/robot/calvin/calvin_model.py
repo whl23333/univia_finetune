@@ -21,7 +21,7 @@ from experiments.robot.robot_utils import (
     set_seed_everywhere,
 )
 from experiments.robot.openvla_utils import get_processor
-from prismatic.models.policy.transformer_utils import MAPBloc
+from prismatic.models.policy.transformer_utils import MAPBlock
 
 
 
@@ -93,7 +93,7 @@ class WrappedCalvinEvaluation(CalvinBaseModel):
         """
         This is called
         """ 
-        self.model.module.action_decoder.reset()
+        self.model.action_decoder.reset()
         self.prev_hist_action = ['']
 
 
@@ -112,16 +112,64 @@ class WrappedCalvinEvaluation(CalvinBaseModel):
             "state": [],
         }
 
-        # Query model to get latent action
-        latent_action, visual_embed, generated_ids = get_latent_action(
-            self.cfg,
-            self.model.module.vla,
-            observation,
-            instruction,
-            processor=self.processor,
-        )
+        # Register forward hooks to capture internal features during the model's forward pass
+        captures = {}
+
+        def _save_patch_features(module, inputs, output):
+            captures["patch_features"] = output
+
+        def _save_projected(module, inputs, output):
+            captures["projected_patch_embeddings"] = output
+
+        def _save_input_embeddings(module, inputs, output):
+            captures["input_embeddings"] = output
+
+        def _save_action_embedings(module, inputs, output):
+            captures['action_embeddings'] = output
+
+        # Attach hooks
+        # patch_features
+        vh = self.model.vla.vision_backbone.register_forward_hook(_save_patch_features)
+        # projected_patch_embeddings
+        pj = self.model.vla.projector.register_forward_hook(_save_projected)
+        emb_module = self.model.vla.get_input_embeddings()
+        # input_embeddings
+        eh = emb_module.register_forward_hook(_save_input_embeddings)
+        # action_embeddings
+        ah = self.model.action_decoder.net.latent_action_pool.register_forward_hook(_save_action_embedings)
+
+        try:
+            # Query model to get latent action (this triggers the hooks once per step)
+            latent_action, visual_embed, generated_ids = get_latent_action(
+                self.cfg,
+                self.model.vla,
+                observation,
+                instruction,
+                processor=self.processor,
+            )
+        finally:
+            # Always remove hooks to avoid memory leaks or duplicate captures
+            vh.remove()
+            pj.remove()
+            eh.remove()
 
         # Get decoded action
-        action = self.model.module.action_decoder(latent_action, visual_embed)
+        try:
+            action = self.model.action_decoder(latent_action, visual_embed)
+        finally:
+            ah.remove()
+        embeddings = {}
+        # embeddings['latent_action'] = latent_action
+        # embeddings['visual_embed'] = visual_embed
+        # embeddings['generated_ids'] = generated_ids
+        # Add captured internal features if available
+        # if "patch_features" in captures:
+        #     embeddings["patch_features"] = captures["patch_features"]
+        if "projected_patch_embeddings" in captures:
+            embeddings["projected_patch_embeddings"] = captures["projected_patch_embeddings"]
+        # if "input_embeddings" in captures:
+        #     embeddings["input_embeddings"] = captures["input_embeddings"]
+        if "action_embeddings" in captures:
+            embeddings["action_embeddings"] = captures["action_embeddings"]
 
-        return action
+        return {"action": action, "embeddings": embeddings}

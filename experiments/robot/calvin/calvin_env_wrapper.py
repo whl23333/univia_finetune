@@ -32,6 +32,9 @@ class CalvinEnvWrapperRaw(gym.Wrapper):
 
     @staticmethod
     def set_egl_device(device):
+        os.environ["EGL_VISIBLE_DEVICES"] = "0"
+        logger.info(f"EGL_DEVICE_ID 0 (default) <==> CUDA_DEVICE_ID {torch.cuda.current_device()}")
+        return
         if "EGL_VISIBLE_DEVICES" in os.environ:
             logger.warning("Environment variable EGL_VISIBLE_DEVICES is already set. Is this intended?")
         # modified: cuda_id = device.index if device.type == "cuda" else 0

@@ -31,11 +31,12 @@ import sys
 import time
 from collections import deque, Counter
 import copy
-from moviepy.editor import ImageSequenceClip
+# from moviepy.editor import ImageSequenceClip
 from accelerate import Accelerator
 from datetime import timedelta
 from accelerate.utils import InitProcessGroupKwargs
-
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../')))
 from calvin_agent.models.calvin_base_model import CalvinBaseModel
 from experiments.robot.calvin.calvin_model import WrappedCalvinEvaluation, WrappedModel
 
@@ -59,7 +60,8 @@ logger = logging.getLogger(__name__)
 
 os.environ["NCCL_TIMEOUT"] = '0'    # No timeout limits for garthering eval results
 os.environ["FFMPEG_BINARY"] = "auto-detect"
-CALVIN_ROOT = '/cpfs01/user/buqingwen/calvin'
+os.environ["DISABLE_FLASH_ATTN"] = "1"
+CALVIN_ROOT = '/home/yjh/calvin'
 
 
 def print_and_save(results, sequences, eval_result_path, task_name=None, epoch=None):
@@ -233,16 +235,16 @@ class GenerateConfig:
     # Model-specific parameters
     #################################################################################################################
     model_family: str = "openvla"                    # Model family
-    pretrained_checkpoint: Union[str, Path] = "./vla-scripts/calvin_log/finetune-calvin"     # Pretrained checkpoint path
+    pretrained_checkpoint: Union[str, Path] = "/home/yjh/.cache/huggingface/hub/models--qwbu--univla-7b-224-sft-calvin/snapshots/1bba95d6209c1eb03d87b2bdb9b71fe2420c5413/"     # Pretrained checkpoint path
     load_in_8bit: bool = False                       # Load with 8-bit quantization
     load_in_4bit: bool = False                       # Load with 4-bit quantization
     
-    action_decoder_path:str = "./vla-scripts/calvin_log/finetune-calvin/action_decoder.pt"
+    action_decoder_path:str = "/home/yjh/.cache/huggingface/hub/models--qwbu--univla-7b-224-sft-calvin/snapshots/1bba95d6209c1eb03d87b2bdb9b71fe2420c5413/action_decoder.pt"
     center_crop: bool = False                        # Center crop? (if trained w/ random crop image aug)
 
     task_suite_name: str = "calvin"                  # Task suite. 
     unnorm_key: str = "calvin"
-    calvin_root: str = '/calvin/dataset/task_ABC_D'  # Path to your local CALVIN path
+    calvin_root: str = '/home/yjh/UniVLA/fake_dataset'  # Path to your local CALVIN path
 
     #################################################################################################################
     # Utils
@@ -255,6 +257,7 @@ class GenerateConfig:
     wandb_entity: str = "opendrivelab"               # Name of entity to log under
 
     seed: int = 7                                    # Random Seed (for reproducibility)
+    window_size: int = 12                            # Action decoder window size
 
 
 
