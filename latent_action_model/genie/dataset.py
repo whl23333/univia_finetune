@@ -215,7 +215,7 @@ class LightningOpenX(LightningDataset):
             use_custom_frames: bool = False,
             custom_frames_root: Optional[str] = None,
             frame_interval: int = 10,
-            num_workers_custom: int = 8,
+            num_workers_custom: int = 12,
             **kwargs
     ) -> None:
         super(LightningOpenX, self).__init__(**kwargs)
@@ -256,32 +256,32 @@ class LightningOpenX(LightningDataset):
             
             if stage == "fit":
                 self.train_dataset = NpzDataset_for_MotoGPT_Video_Multiview(
-                    split='training',
+                    split='train',
                     skip_frame=self.frame_interval,
                     sequence_length=1,
                     npz_dir=self.custom_frames_root,
-                    rgb_shape_static=(200, 200),
-                    rgb_shape_gripper=(84, 84),
-                    rgb_preprocessor=Resize((self.resolution, self.resolution), interpolation=InterpolationMode.BICUBIC, antialias=True),
+                    rgb_shape_static=self.resolution,
+                    rgb_shape_gripper=self.resolution,
+                    rgb_preprocessor=Resize(self.resolution, interpolation=InterpolationMode.BICUBIC, antialias=True),
                 )
 
                 self.val_dataset = NpzDataset_for_MotoGPT_Video_Multiview(
-                    split='validation',
+                    split='val',
                     skip_frame=self.frame_interval,
                     sequence_length=1,
                     npz_dir=self.custom_frames_root,
-                    rgb_shape_static=(200, 200),
-                    rgb_shape_gripper=(84, 84),
-                    rgb_preprocessor=Resize((self.resolution, self.resolution), interpolation=InterpolationMode.BICUBIC, antialias=True),
+                    rgb_shape_static=self.resolution,
+                    rgb_shape_gripper=self.resolution,
+                    rgb_preprocessor=Resize(self.resolution, interpolation=InterpolationMode.BICUBIC, antialias=True),
                 )
             elif stage == "test":
                 self.test_dataset = NpzDataset_for_MotoGPT_Video_Multiview(
-                    split='validation',
+                    split='val',
                     skip_frame=self.frame_interval,
                     sequence_length=1,
                     npz_dir=self.custom_frames_root,
-                    rgb_shape_static=(200, 200),
-                    rgb_shape_gripper=(84, 84),
+                    rgb_shape_static=self.resolution,
+                    rgb_shape_gripper=self.resolution,
                     rgb_preprocessor=Resize((self.resolution, self.resolution), interpolation=InterpolationMode.BICUBIC, antialias=True),
                 )
             else:
@@ -691,11 +691,15 @@ class NpzDataset_for_MotoGPT_Video_Multiview(Dataset):
 
     
     def __getitem__(self, idx):
-        while True:
-            try:
-                return self.obtain_item(idx)
-            except Exception as e:
-                idx = random.randint(0, len(self)-1)
+        # while True:
+        #     try:
+        #         return self.obtain_item(idx)
+        #     except Exception as e:
+        #         idx = random.randint(0, len(self)-1)
+        try:
+            return self.obtain_item(idx)
+        except Exception as e:
+            raise e
             
 
     def __len__(self):

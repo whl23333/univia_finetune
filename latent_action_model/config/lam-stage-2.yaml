@@ -21,7 +21,7 @@ model:
   task_name: task_centric_lam_stage2
   make_data_pair: &make_data_pair false
   stage: stage-2
-  stage_one_ckpt: ./logs/task_centric_lam_stage1/epoch=0-step=100000.ckpt
+  stage_one_ckpt: /data/250010208/whl/UniVLA/checkpoints/latent_action_model/lam-stage-1.ckpt
 
 data:
   data_root: /path/to/your/rlds_data_collection
@@ -32,6 +32,8 @@ data:
   episodic: false
   shuffle_buffer_size: 45000            # works fine for 1,600 GB memories, plz adjust based on yout setup
   image_aug: true
+  use_custom_frames: true
+  custom_frames_root: /data/share/calvin/task_ABC_D
 
 trainer:
   max_epochs: 20
