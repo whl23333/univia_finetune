@@ -184,6 +184,7 @@ def train(cfg: TrainConfig) -> None:
     )
     
     from latent_action_model.genie.modules.lam import ControllableDINOLatentActionModel
+    from latent_action_model.genie.modules.lam import ControllableDINOLatentActionModelMultiView
 
     latent_action_model = ControllableDINOLatentActionModel(
         in_dim=3,

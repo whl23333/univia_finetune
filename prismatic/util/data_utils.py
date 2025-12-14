@@ -377,6 +377,49 @@ class CollatorForLatentAction:
 
         return output
 
+@dataclass
+class CollatorForLatentActionMultiView:
+    pixel_values_dtype: torch.dtype = torch.float32
+
+    def __call__(self, instances: Sequence[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:
+        
+        if "dataset_name" in instances[0]:
+            dataset_names = [instance["dataset_name"] for instance in instances]
+        else:
+            dataset_names = None
+
+        initial_pixel_values = [instance["initial_pixel_values"] for instance in instances]
+        initial_pixel_values = torch.stack(initial_pixel_values)
+        
+        target_pixel_values = [instance["target_pixel_values"] for instance in instances]
+        target_pixel_values = torch.stack(target_pixel_values)
+        pixel_values = torch.stack([initial_pixel_values, target_pixel_values], dim=1)
+
+        initial_pixel_values_view2 = [instance["initial_pixel_values_gripper"] for instance in instances]
+        initial_pixel_values_view2 = torch.stack(initial_pixel_values_view2)
+        
+        target_pixel_values_view2 = [instance["target_pixel_values_gripper"] for instance in instances]
+        target_pixel_values_view2 = torch.stack(target_pixel_values_view2)
+        pixel_values_view2 = torch.stack([initial_pixel_values_view2, target_pixel_values_view2], dim=1)
+
+
+        action = [torch.from_numpy(instance["action"]) for instance in instances]
+        action = torch.stack(action)
+
+        # removing all punctuation in task instruction
+        task_instruction = [re.sub('[{}]'.format(string.punctuation),"",instance["task_instruction"]) for instance in instances]
+
+
+        output = dict(
+            videos=pixel_values,
+            videos_view2=pixel_values_view2,
+            task_instruction=task_instruction,
+            action=action,
+        )
+        if dataset_names is not None:
+            output["dataset_names"] = dataset_names
+
+        return output
 
 @dataclass
 class CollatorForMultiViewVideo:

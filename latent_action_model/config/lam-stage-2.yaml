@@ -18,7 +18,7 @@ model:
       lr: 1e-4
       weight_decay: 1e-2
 
-  task_name: task_centric_lam_stage2
+  task_name: task_centric_lam_stage2_multiview
   make_data_pair: &make_data_pair false
   stage: stage-2
   stage_one_ckpt: /data/250010208/whl/UniVLA/checkpoints/latent_action_model/lam-stage-1.ckpt
@@ -26,7 +26,7 @@ model:
 data:
   data_root: /path/to/your/rlds_data_collection
   data_mix: omni_magic_soup_plus_plus   # Manip. + Navi. + Human                                  
-  batch_size: 64
+  batch_size: 32
   resolution: 224
   num_frames: 16  # TODO
   episodic: false
@@ -48,7 +48,7 @@ trainer:
   callbacks:
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
-        dirpath: ./logs/task_centric_lam_stage2
+        dirpath: ./logs/task_centric_lam_stage2_multiview
         verbose: true
         save_last: true
         save_top_k: -1
@@ -58,4 +58,4 @@ trainer:
     - class_path: lightning.pytorch.loggers.TensorBoardLogger
       init_args:
         save_dir: ./logs
-        name: task_centric_lam_stage2
+        name: task_centric_lam_stage2_multiview

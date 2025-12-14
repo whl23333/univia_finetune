@@ -18,7 +18,7 @@ import os
 from glob import glob
 
 from prismatic.util import set_global_seed
-from prismatic.util.data_utils import CollatorForLatentAction, CollatorForMultiViewVideo
+from prismatic.util.data_utils import CollatorForLatentAction, CollatorForMultiViewVideo, CollatorForLatentActionMultiView
 from prismatic.vla.datasets import RLDSDataset, EpisodicRLDSDataset, RLDSBatchTransformVideo
 import json
 from torchvision.transforms.v2 import Resize, InterpolationMode
@@ -243,7 +243,7 @@ class LightningOpenX(LightningDataset):
         self.batch_transform = RLDSBatchTransformVideo(
             image_transform=transforms.ToTensor() 
         )
-        self.collate_fn = CollatorForLatentAction()
+        self.collate_fn = CollatorForLatentAction() if not self.use_custom_frames else CollatorForLatentActionMultiView()
 
         self.save_hyperparameters()
 
