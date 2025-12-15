@@ -126,6 +126,28 @@ class Exp_DinoSigLIP_224px_OXE_Magic_Soup_Plus(Exp_SigLIP_224px_Bridge):
 
 
 
+@dataclass
+class Finetune_DinoSigLIP_224px_CALVIN(Exp_DinoSigLIP_224px_OXE_Magic_Soup_Plus):
+    vla_id: str = "prism-dinosiglip-224px+ft-calvin"
+
+    data_mix: str = "calvin"
+    shuffle_buffer_size: int = 20_000
+
+    # Optimization Parameters
+    epochs: int = 10
+    max_steps: Optional[int] = None
+
+    expected_world_size: int = 1
+    global_batch_size: int = 32
+    per_device_batch_size: int = 32
+
+    learning_rate: float = 1e-5
+
+    # Fine-tuning Strategy
+    freeze_vision_backbone: bool = True
+    freeze_llm_backbone: bool = True
+    unfreeze_last_llm_layer: bool = True # Only fine-tune last LLM layer
+
 
 # === Define a VLA Registry Enum for Reference & Validation ===
 @unique
@@ -141,6 +163,9 @@ class VLARegistry(Enum):
 
     # Pre-training on full dataset
     DINOSIGLIP_224PX_MX_OXE_MAGIC_SOUP_PLUS = Exp_DinoSigLIP_224px_OXE_Magic_Soup_Plus
+
+    # Fine-tuning on CALVIN after pre-training
+    FINETUNE_DINOSIGLIP_224PX_CALVIN = Finetune_DinoSigLIP_224px_CALVIN
 
 
     @property

@@ -23,6 +23,8 @@ from prismatic.vla.action_tokenizer import ActionTokenizer
 from prismatic.vla.datasets.rlds import make_interleaved_dataset, make_single_dataset
 from prismatic.vla.datasets.rlds.oxe import OXE_NAMED_MIXTURES, get_oxe_dataset_kwargs_and_weights
 from prismatic.vla.datasets.rlds.utils.data_utils import NormalizationType
+from prismatic.vla.datasets.calvin_dataset import DiskCalvinDataset
+from torch.utils.data import DataLoader
 
 # HuggingFace Default / LLaMa-2 IGNORE_INDEX (for labels)
 IGNORE_INDEX = -100
@@ -229,17 +231,24 @@ class RLDSBatchTransformLatentAction:
     def __call__(self, rlds_batch: Dict[str, Any]) -> Dict[str, Any]:
         """Converts a RLDS batch to the format expected by the OpenVLA collator/models."""
         dataset_name, action = rlds_batch["dataset_name"], rlds_batch["action"][0]
-        # img = Image.fromarray(rlds_batch["observation"]["image_primary"][0])
         lang = rlds_batch["task"]["language_instruction"].decode().lower()
 
-        # print(len(rlds_batch["observation"]["image_primary"]))
-        img = Image.fromarray(rlds_batch["observation"]["image_primary"][0])
-        img_k = Image.fromarray(rlds_batch["observation"]["image_primary"][-1])
-        pixel_values = self.image_transform(img)
+        pre = rlds_batch.get("preprocessed")
+        if pre and pre.get("pixel_values") is not None:
+            pixel_values = pre["pixel_values"]
+        else:
+            img = Image.fromarray(rlds_batch["observation"]["image_primary"][0])
+            pixel_values = self.image_transform(img)
 
         with torch.no_grad():
-            initial_pixel_values = self.image_transform_lam(img)
-            target_pixel_values = self.image_transform_lam(img_k)
+            if pre and pre.get("initial_pixel_values") is not None and pre.get("target_pixel_values") is not None:
+                initial_pixel_values = pre["initial_pixel_values"]
+                target_pixel_values = pre["target_pixel_values"]
+            else:
+                img = Image.fromarray(rlds_batch["observation"]["image_primary"][0])
+                img_k = Image.fromarray(rlds_batch["observation"]["image_primary"][-1])
+                initial_pixel_values = self.image_transform_lam(img)
+                target_pixel_values = self.image_transform_lam(img_k)
             video = torch.stack([initial_pixel_values, target_pixel_values], dim=0).unsqueeze(0).to(self.action_tokenizer.device)
             latent_action_idx = self.action_tokenizer.vq_encode(video)['indices'].squeeze()
 

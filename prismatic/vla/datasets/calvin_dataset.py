@@ -898,4 +898,72 @@ def load_pkl(filename: Path) -> Dict[str, np.ndarray]:
 def load_npz(filename: Path) -> Dict[str, np.ndarray]:
     return np.load(filename.as_posix())
 
+class DiskCalvinIterableDataset(torch.utils.data.IterableDataset):
+    """
+    Iterable version of DiskCalvinDataset that yields RLDS-style batches:
+    - observation.image_primary: (window, H, W, C) uint8
+    - action: (window, action_dim) float32
+    - task.language_instruction: bytes
+    - dataset_name: str
+    - optional preprocessed: pixel_values, initial/target pixel_values, history frames, proprio
+    """
+    def __init__(
+        self,
+        base: DiskCalvinDataset,
+        resize_resolution: Tuple[int, int] = (224, 224),
+        shuffle: bool = True,
+        batch_transform=None,
+    ) -> None:
+        super().__init__()
+        self.base = base
+        self.resize_resolution = resize_resolution
+        self.shuffle = shuffle
+        self.batch_transform = batch_transform
+
+    def __iter__(self):
+        indices = list(range(len(self.base)))
+        if self.shuffle:
+            np.random.shuffle(indices)
+        H, W = self.resize_resolution
+        for idx in indices:
+            sample = self.base[idx]
+
+            # # image_obs: (window, H0, W0, C) -> resize to (H, W, C)
+            # image_obs = sample.get("image_obs")
+            # assert image_obs is not None, "DiskCalvinDataset must provide image_obs"
+            # if image_obs.shape[1] != H or image_obs.shape[2] != W:
+            #     resized = []
+            #     for frame in image_obs:
+            #         img = Image.fromarray(frame.astype(np.uint8))
+            #         img = img.resize((W, H))
+            #         resized.append(np.asarray(img, dtype=np.uint8))
+            #     image_obs = np.stack(resized, axis=0)
+
+            rlds_batch = {
+                # "observation": {"image_primary": image_obs},
+                "action": sample["actions"].numpy() if hasattr(sample["actions"], 'numpy') else np.asarray(sample["actions"], dtype=np.float32),
+                "task": {"language_instruction": sample["lang"].encode("utf-8") if isinstance(sample["lang"], str) else sample["lang"][0].encode("utf-8")},
+                "dataset_name": sample.get("dataset_name", "calvin"),
+            }
+
+            pre = {
+                "pixel_values": sample.get("pixel_values"),
+                "initial_pixel_values": sample.get("initial_pixel_values"),
+                "target_pixel_values": sample.get("target_pixel_values"),
+                "initial_pixel_values_hist": sample.get("initial_pixel_values_hist"),
+                "target_pixel_values_hist": sample.get("target_pixel_values_hist"),
+                "proprio": sample.get("proprio"),
+            }
+            # Only attach if any are present
+            if any(v is not None for v in pre.values()):
+                rlds_batch["preprocessed"] = pre
+
+            yield self.batch_transform(rlds_batch) if self.batch_transform else rlds_batch
+
+    def as_numpy_iterator(self):
+        return self.__iter__()
+
+    def __len__(self) -> int:
+        return len(self.base)
+
 

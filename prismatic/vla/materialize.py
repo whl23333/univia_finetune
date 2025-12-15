@@ -16,6 +16,8 @@ from prismatic.models.backbones.vision import ImageTransform
 from prismatic.util.data_utils import PaddedCollatorForActionPrediction
 from prismatic.vla.action_tokenizer import ActionTokenizer
 from prismatic.vla.datasets import EpisodicRLDSDataset, RLDSBatchTransform, RLDSBatchTransformLatentAction, RLDSDataset
+from prismatic.vla.datasets.calvin_dataset import DiskCalvinDataset, DiskCalvinIterableDataset
+from transformers import AutoProcessor
 
 
 def get_vla_dataset_and_collator(
@@ -71,6 +73,8 @@ def get_latent_vla_dataset_and_collator(
     train: bool = True,
     episodic: bool = False,
     image_aug: bool = False,
+    use_calvin: bool = False,
+    pretrained_vla_path: str = "",
 ) -> Tuple[Dataset, ActionTokenizer, PaddedCollatorForActionPrediction]:
     """Initialize RLDS Dataset (wraps TFDS), ActionTokenizer, and initialize transform/collation functions."""
     # action_tokenizer = ActionTokenizer(tokenizer)
@@ -89,16 +93,43 @@ def get_latent_vla_dataset_and_collator(
 
 
     # Build RLDS Iterable Dataset
-    cls = RLDSDataset if not episodic else EpisodicRLDSDataset
-    dataset = cls(
-        data_root_dir,
-        data_mix,
-        batch_transform,
-        resize_resolution=default_image_resolution[1:],
-        shuffle_buffer_size=shuffle_buffer_size,
-        train=train,
-        image_aug=image_aug,
-        training_phase='pre-training',
-    )
+    if use_calvin:
+        processor = AutoProcessor.from_pretrained(pretrained_vla_path, trust_remote_code=True)  # Replace with actual path
+        disk_dataset = DiskCalvinDataset(
+            datasets_dir=data_root_dir / "training",  # Replace with actual path
+            image_fn=None,
+            text_fn=None,
+            window_size=10,
+            traj_cons=False,
+            text_aug=False,
+            dif_ws=False,
+            min_window_size=10,
+            max_window_size=10,
+            partial_data=False,
+            sampling_step=1,
+            action_tokenizer = None,
+            base_tokenizer = None,
+            image_transform = processor.image_processor.apply_transform,
+            prompt_builder_fn = None,
+        )
+        dataset = DiskCalvinIterableDataset(
+            base=disk_dataset,
+            resize_resolution=default_image_resolution[1:],
+            shuffle=True,
+            batch_transform=batch_transform,
+        )
+        return dataset, tokenizer, collator
+    else:
+        cls = RLDSDataset if not episodic else EpisodicRLDSDataset
+        dataset = cls(
+            data_root_dir,
+            data_mix,
+            batch_transform,
+            resize_resolution=default_image_resolution[1:],
+            shuffle_buffer_size=shuffle_buffer_size,
+            train=train,
+            image_aug=image_aug,
+            training_phase='pre-training',
+        )
 
-    return dataset, tokenizer, collator
+        return dataset, tokenizer, collator

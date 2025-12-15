@@ -21,7 +21,7 @@ from transformers import AutoModelForVision2Seq, AutoProcessor, BitsAndBytesConf
 from transformers import AutoConfig, AutoImageProcessor
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
-from latent_action_model.genie.modules.lam import ControllableDINOLatentActionModel
+from latent_action_model.genie.modules.lam import ControllableDINOLatentActionModel, ControllableDINOLatentActionModelMultiView
 
 import wandb
 from prismatic.vla.datasets import DiskCalvinDataset
@@ -152,8 +152,11 @@ class FinetuneConfig:
 
     # Tracking Parameters
     wandb_project: str = "fientune-CALVIN"                          # Name of W&B project to log to (use default!)
-    wandb_entity: str = "opendrivelab"                              # Name of entity to log under
+    wandb_entity: str = "whl23333-tsinghua-university"                              # Name of entity to log under
     run_id_note: Optional[str] = None                               # Extra note for logging, Weights & Biases
+
+    # multiview
+    multiview: bool = False
 
     # fmt: on
 
@@ -187,6 +190,8 @@ def finetune(cfg: FinetuneConfig) -> None:
         exp_id += "--image_aug"
 
     exp_id += f'=w-LowLevelDecoder-ws-{cfg.window_size}'
+    if cfg.multiview:
+        exp_id += f'+multiview'
 
     # Start =>> Build Directories
     run_dir, adapter_dir = cfg.run_root_dir / exp_id, cfg.adapter_tmp_dir / exp_id
@@ -248,17 +253,30 @@ def finetune(cfg: FinetuneConfig) -> None:
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size = int(cfg.max_steps * 8 * 0.8), gamma=0.1)
 
     # Create latent action model
-    latent_action_model = ControllableDINOLatentActionModel(
-        in_dim=3,
-        model_dim=cfg.lam_model_dim,
-        latent_dim=cfg.lam_latent_dim,
-        num_latents=cfg.codebook_size,
-        patch_size=cfg.lam_patch_size,
-        enc_blocks=cfg.lam_enc_blocks,
-        dec_blocks=cfg.lam_dec_blocks,
-        num_heads=cfg.lam_num_heads,
-        dropout=0.,
-    )
+    if cfg.multiview:
+        latent_action_model = ControllableDINOLatentActionModelMultiView(
+            in_dim=3,
+            model_dim=cfg.lam_model_dim,
+            latent_dim=cfg.lam_latent_dim,
+            num_latents=cfg.codebook_size,
+            patch_size=cfg.lam_patch_size,
+            enc_blocks=cfg.lam_enc_blocks,
+            dec_blocks=cfg.lam_dec_blocks,
+            num_heads=cfg.lam_num_heads,
+            dropout=0.,
+        )
+    else:
+        latent_action_model = ControllableDINOLatentActionModel(
+            in_dim=3,
+            model_dim=cfg.lam_model_dim,
+            latent_dim=cfg.lam_latent_dim,
+            num_latents=cfg.codebook_size,
+            patch_size=cfg.lam_patch_size,
+            enc_blocks=cfg.lam_enc_blocks,
+            dec_blocks=cfg.lam_dec_blocks,
+            num_heads=cfg.lam_num_heads,
+            dropout=0.,
+        )
 
     lam_ckpt = torch.load(cfg.lam_path)['state_dict']
     new_ckpt = {}
