@@ -450,53 +450,78 @@ class ControllableDINOLatentActionModelMultiView(nn.Module):
             "emb": emb_3d,
             "indices": indices_3d
         }
+    
+    # vq_encode interface
+    def vq_encode(self, videos: Tensor, videos_gripper: Tensor) -> Dict:
+        # Encode two views
+        outputs_view1 = self.single_view_encode(videos)
+        outputs_view2 = self.single_view_encode(videos_gripper)
+        z_action_view1 = outputs_view1['z_action']
+        z_action_view2 = outputs_view2['z_action']
+        outputs_3d = self.encode_3d(z_action_view1, z_action_view2)
+
+        return {
+            "patches": outputs_view1["patches"],
+            'z_q': outputs_3d["z_q"],
+            'z': outputs_3d['z'],
+            'emb': outputs_3d['emb'],
+            "z_q_uncontrol_view1": outputs_view1["z_q_uncontrol"],
+            "z_q_uncontrol_view2": outputs_view2["z_q_uncontrol"],
+            "z_uncontrol_view1": outputs_view1["z_uncontrol"],
+            "z_uncontrol_view2": outputs_view2["z_uncontrol"],
+            "emb_uncontrol_view1": outputs_view1["emb_uncontrol"],
+            "emb_uncontrol_view2": outputs_view2["emb_uncontrol"],
+            "indices": outputs_3d["indices"],
+            "indices_uncontrol_view1": outputs_view1["indices_uncontrol"],
+            "indices_uncontrol_view2": outputs_view2["indices_uncontrol"],
+        }
 
         
 
 
-    def vq_encode(self, videos: Tensor, lang_embed: Tensor = None, attention_mask: Tensor = None) -> Dict:
-        # Preprocess videos
-        B, T = videos.shape[:2]
-        videos = rearrange(videos, "b T c h w -> (b T) c h w")
-        videos = self.dino_transform(videos)
-        dion_features = self.dino_encoder.forward_features(videos)['x_norm_patchtokens']
-        dion_features = rearrange(dion_features, "(b T) l d -> b T l d", T=2)
+    # def vq_encode(self, videos: Tensor, lang_embed: Tensor = None, attention_mask: Tensor = None) -> Dict:
+    #     # Preprocess videos
+    #     B, T = videos.shape[:2]
+    #     videos = rearrange(videos, "b T c h w -> (b T) c h w")
+    #     videos = self.dino_transform(videos)
+    #     dion_features = self.dino_encoder.forward_features(videos)['x_norm_patchtokens']
+    #     dion_features = rearrange(dion_features, "(b T) l d -> b T l d", T=2)
 
-        action_pad = self.action_latent.expand(B, T, -1, -1)
-        padded_patches = torch.cat([action_pad, dion_features], dim=2)
-        action_pad_controllable = self.action_latent_controllable.expand(B, T, -1, -1)
-        padded_patches = torch.cat([action_pad_controllable, padded_patches], dim=2)
+    #     action_pad = self.action_latent.expand(B, T, -1, -1)
+    #     padded_patches = torch.cat([action_pad, dion_features], dim=2)
+    #     action_pad_controllable = self.action_latent_controllable.expand(B, T, -1, -1)
+    #     padded_patches = torch.cat([action_pad_controllable, padded_patches], dim=2)
 
-        # Encode
-        z = self.encoder(padded_patches) 
+    #     # Encode
+    #     z = self.encoder(padded_patches) 
       
-        # Get 'uncotrollable' latent action for all future frames
-        z_uncontrol = self.to_codebook_uncontrol(z[:, 1:, self.num_codes : self.num_codes * 2])
+    #     # Get 'uncotrollable' latent action for all future frames
+    #     z_uncontrol = self.to_codebook_uncontrol(z[:, 1:, self.num_codes : self.num_codes * 2])
 
-        # Vector quantize
-        z_uncontrol = z_uncontrol.reshape(B * (T - 1), self.num_codes, self.latent_dim)
-        z_q_uncontrol, z_uncontrol, emb_uncontrol, indices_uncontrol = self.vq(z_uncontrol)
-        z_q_uncontrol = z_q_uncontrol.reshape(B, T - 1, self.num_codes, self.latent_dim)
+    #     # Vector quantize
+    #     z_uncontrol = z_uncontrol.reshape(B * (T - 1), self.num_codes, self.latent_dim)
+    #     z_q_uncontrol, z_uncontrol, emb_uncontrol, indices_uncontrol = self.vq(z_uncontrol)
+    #     z_q_uncontrol = z_q_uncontrol.reshape(B, T - 1, self.num_codes, self.latent_dim)
 
-        # Get 'cotrollable' latent action for all future frames
-        z_action = self.to_codebook(z[:, 1:, :self.num_codes])  # (B, T-1, n, E)
+    #     # Get 'cotrollable' latent action for all future frames
+    #     z_action = self.to_codebook(z[:, 1:, :self.num_codes])  # (B, T-1, n, E)
 
-        # Vector quantize
-        z_action = z_action.reshape(B * (T - 1), self.num_codes, self.latent_dim)
-        z_q, z, emb, indices = self.vq_action(z_action)
-        z_q = z_q.reshape(B, T - 1, self.num_codes, self.latent_dim)
+    #     # Vector quantize
+    #     z_action = z_action.reshape(B * (T - 1), self.num_codes, self.latent_dim)
+    #     z_q, z, emb, indices = self.vq_action(z_action)
+    #     z_q = z_q.reshape(B, T - 1, self.num_codes, self.latent_dim)
 
-        return {
-            "patches": dion_features,
-            "z_q": z_q,
-            "z": z,
-            "emb": emb,
-            "z_q_uncontrol": z_q_uncontrol,
-            "z_uncontrol": z_uncontrol,
-            "emb_uncontrol": emb_uncontrol,
-            "indices": indices,
-            "indices_uncontrol": indices_uncontrol,
-        }
+    #     return {
+    #         "patches": dion_features,
+    #         "z_q": z_q,
+    #         "z": z,
+    #         "emb": emb,
+    #         "z_q_uncontrol": z_q_uncontrol,
+    #         "z_uncontrol": z_uncontrol,
+    #         "emb_uncontrol": emb_uncontrol,
+    #         "indices": indices,
+    #         "indices_uncontrol": indices_uncontrol,
+    #     }
 
     def forward(self, batch: Dict) -> Dict:
         # Encode + VQ
