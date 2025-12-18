@@ -15,13 +15,14 @@ model:
   optimizer:
     class_path: torch.optim.AdamW
     init_args:
-      lr: 1e-4
-      weight_decay: 1e-2
+      lr: 2e-5
+      weight_decay: 5e-3
 
-  task_name: task_centric_lam_stage2_multiview
+  task_name: lam_stage_2_finetune_on_calvin_lr2e5_multi_view
   make_data_pair: &make_data_pair false
   stage: stage-2
   stage_one_ckpt: /data/250010208/whl/UniVLA/checkpoints/latent_action_model/lam-stage-1.ckpt
+  stage_two_ckpt: /data/250010208/whl/UniVLA/checkpoints/latent_action_model/lam-stage-2.ckpt
 
 data:
   data_root: /path/to/your/rlds_data_collection
@@ -31,7 +32,7 @@ data:
   num_frames: 16  # TODO
   episodic: false
   shuffle_buffer_size: 45000            # works fine for 1,600 GB memories, plz adjust based on yout setup
-  image_aug: true
+  image_aug: false
   use_custom_frames: true
   custom_frames_root: /data/share/calvin/task_ABC_D
 
@@ -48,7 +49,7 @@ trainer:
   callbacks:
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
-        dirpath: ./logs/task_centric_lam_stage2_multiview
+        dirpath: ./logs/lam_stage_2_finetune_on_calvin_lr2e5_multi_view
         verbose: true
         save_last: true
         save_top_k: -1
@@ -58,4 +59,4 @@ trainer:
     - class_path: lightning.pytorch.loggers.TensorBoardLogger
       init_args:
         save_dir: ./logs
-        name: task_centric_lam_stage2_multiview
+        name: lam_stage_2_finetune_on_calvin_lr2e5_multi_view
