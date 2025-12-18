@@ -23,6 +23,7 @@ from prismatic.vla.datasets import RLDSDataset, EpisodicRLDSDataset, RLDSBatchTr
 import json
 from torchvision.transforms.v2 import Resize, InterpolationMode
 import numpy as np
+import torchvision.transforms.functional as TF
 
 def exists(var) -> bool:
     return var is not None
@@ -263,6 +264,7 @@ class LightningOpenX(LightningDataset):
                     rgb_shape_static=self.resolution,
                     rgb_shape_gripper=self.resolution,
                     rgb_preprocessor=Resize(self.resolution, interpolation=InterpolationMode.BICUBIC, antialias=True),
+                    image_aug=self.image_aug,
                 )
 
                 self.val_dataset = NpzDataset_for_MotoGPT_Video_Multiview(
@@ -273,6 +275,7 @@ class LightningOpenX(LightningDataset):
                     rgb_shape_static=self.resolution,
                     rgb_shape_gripper=self.resolution,
                     rgb_preprocessor=Resize(self.resolution, interpolation=InterpolationMode.BICUBIC, antialias=True),
+                    image_aug=False,
                 )
             elif stage == "test":
                 self.test_dataset = NpzDataset_for_MotoGPT_Video_Multiview(
@@ -283,6 +286,7 @@ class LightningOpenX(LightningDataset):
                     rgb_shape_static=self.resolution,
                     rgb_shape_gripper=self.resolution,
                     rgb_preprocessor=Resize((self.resolution, self.resolution), interpolation=InterpolationMode.BICUBIC, antialias=True),
+                    image_aug=False,
                 )
             else:
                 raise ValueError(f"Invalid stage: {stage}")
@@ -552,7 +556,9 @@ class NpzDataset_for_MotoGPT_Video_Multiview(Dataset):
         self, split, skip_frame, # split: train/val, skip_frame: 5
         sequence_length, # 1
         npz_dir=None, rgb_shape_static=(224, 224), rgb_shape_gripper=(224, 224), # npz_dir: "/group/ycyang/yyang-infobai/task_ABC_D/", rgb_shape: [200, 200]
-        rgb_preprocessor=None, max_skip_frame=None, npz_metadata_path=None, *args, **kwargs): # 'do_extract_future_frames': True, 'do_extract_action': False
+        rgb_preprocessor=None, max_skip_frame=None, npz_metadata_path=None,
+        image_aug: bool = False, augment_kwargs: Optional[Dict] = None,
+        *args, **kwargs): # 'do_extract_future_frames': True, 'do_extract_action': False
 
         super().__init__()
 
@@ -586,6 +592,37 @@ class NpzDataset_for_MotoGPT_Video_Multiview(Dataset):
         self.npz_metadata = npz_metadata
         self.dataset_len = len(npz_metadata) - skip_frame
 
+        # Optional synchronized augmentation across both views (applied AFTER rgb_preprocessor)
+        self.image_aug = image_aug
+        self.augmenter = None
+        if self.image_aug:
+            # defaults mimic RLDS augment config
+            defaults = dict(
+                random_resized_crop=dict(scale=0.9, ratio=1.0),
+                random_brightness=0.2,
+                random_contrast=(0.8, 1.2),
+                random_saturation=(0.8, 1.2),
+                random_hue=0.05,
+                augment_order=(
+                    "random_resized_crop",
+                    "random_brightness",
+                    "random_contrast",
+                    "random_saturation",
+                    "random_hue",
+                ),
+            )
+            cfg = {**defaults, **(augment_kwargs or {})}
+            self.augmenter = _SynchronizedAugment(
+                target_size=tuple(rgb_shape_static),
+                order=tuple(cfg["augment_order"]),
+                rrc_scale=float(cfg["random_resized_crop"]["scale"]),
+                rrc_ratio=float(cfg["random_resized_crop"]["ratio"]),
+                brightness=float(cfg["random_brightness"]),
+                contrast=tuple(cfg["random_contrast"]),
+                saturation=tuple(cfg["random_saturation"]),
+                hue=float(cfg["random_hue"]),
+            )
+
     def get_npz_path(self, npz_basename):
         return os.path.join(self.npz_dir, npz_basename)
 
@@ -613,10 +650,21 @@ class NpzDataset_for_MotoGPT_Video_Multiview(Dataset):
         start_npz_idx = int(npz_basename.split("_")[-1].split(".")[0])
         rgb_initial_static[0], rgb_initial_gripper[0] = _extract_frame(start_npz_idx)
 
+        # Sample augmentation params once per item (shared across time + views)
+        aug_params = None
+        if self.augmenter is not None:
+            H, W = rgb_initial_static[0].shape[-2], rgb_initial_static[0].shape[-1]
+            aug_params = self.augmenter.sample_params(H, W)
+            rgb_initial_static[0] = self.augmenter.apply_one(rgb_initial_static[0], aug_params)
+            rgb_initial_gripper[0] = self.augmenter.apply_one(rgb_initial_gripper[0], aug_params)
+
         for i in range(self.sequence_length):
             next_npz_idx = start_npz_idx+(i+1)*delta_t
             try:
                 rgb_future_static[i], rgb_future_gripper[i] = _extract_frame(next_npz_idx)
+                if aug_params is not None:
+                    rgb_future_static[i] = self.augmenter.apply_one(rgb_future_static[i], aug_params)
+                    rgb_future_gripper[i] = self.augmenter.apply_one(rgb_future_gripper[i], aug_params)
                 latent_mask[i] = 1
             except:
                 break
@@ -704,3 +752,83 @@ class NpzDataset_for_MotoGPT_Video_Multiview(Dataset):
 
     def __len__(self):
         return self.dataset_len
+
+
+class _SynchronizedAugment:
+    """Synchronized augmentation across both views.
+
+    Implements a subset analogous to RLDS:
+      - RandomResizedCrop with fixed scale/ratio, then resize to target_size
+      - Color jitter: brightness/contrast/saturation/hue
+    Parameters are sampled once per item and applied identically to all frames + views.
+    """
+
+    def __init__(
+        self,
+        target_size: Tuple[int, int],
+        order: Tuple[str, ...] = (
+            "random_resized_crop",
+            "random_brightness",
+            "random_contrast",
+            "random_saturation",
+            "random_hue",
+        ),
+        rrc_scale: float = 0.9,
+        rrc_ratio: float = 1.0,
+        brightness: float = 0.2,
+        contrast: Tuple[float, float] = (0.8, 1.2),
+        saturation: Tuple[float, float] = (0.8, 1.2),
+        hue: float = 0.05,
+    ) -> None:
+        self.target_size = tuple(target_size)
+        self.order = order
+        self.rrc_scale = float(rrc_scale)
+        self.rrc_ratio = float(rrc_ratio)
+        self.brightness = float(brightness)
+        self.contrast = tuple(contrast)
+        self.saturation = tuple(saturation)
+        self.hue = float(hue)
+
+    def sample_params(self, H: int, W: int) -> Dict[str, Any]:
+        # RandomResizedCrop params with fixed scale/ratio on already-resized inputs
+        area = self.rrc_scale * float(H * W)
+        side = int(max(1, min(H, W, round(math.sqrt(area)))))
+        top = 0 if H == side else random.randint(0, H - side)
+        left = 0 if W == side else random.randint(0, W - side)
+
+        # Color jitter params
+        b_factor = 1.0 + random.uniform(-self.brightness, self.brightness)
+        c_factor = random.uniform(self.contrast[0], self.contrast[1])
+        s_factor = random.uniform(self.saturation[0], self.saturation[1])
+        h_shift = random.uniform(-self.hue, self.hue)
+
+        return {
+            "crop": (top, left, side, side),
+            "brightness": b_factor,
+            "contrast": c_factor,
+            "saturation": s_factor,
+            "hue": h_shift,
+        }
+
+    def apply_one(self, img: torch.Tensor, params: Dict[str, Any]) -> torch.Tensor:
+        # Ensure float in [0,1] for color ops
+        if img.dtype == torch.uint8:
+            img = img.float() / 255.0
+
+        out = img
+        for op in self.order:
+            if op == "random_resized_crop":
+                top, left, h, w = params["crop"]
+                out = TF.resized_crop(out, top, left, h, w, self.target_size, interpolation=InterpolationMode.BICUBIC)
+            elif op == "random_brightness":
+                out = TF.adjust_brightness(out, params["brightness"])
+            elif op == "random_contrast":
+                out = TF.adjust_contrast(out, params["contrast"])
+            elif op == "random_saturation":
+                out = TF.adjust_saturation(out, params["saturation"])
+            elif op == "random_hue":
+                out = TF.adjust_hue(out, params["hue"])
+            else:
+                # ignore unknown ops
+                continue
+        return out
