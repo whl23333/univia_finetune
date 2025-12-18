@@ -47,6 +47,7 @@ class DINO_LAM(LightningModule):
             optimizer: OptimizerCallable = AdamW,
             make_data_pair: bool = False,
             stage_one_ckpt: str = None,
+            stage_two_ckpt: str = None,
     ) -> None:
         super(DINO_LAM, self).__init__()
         assert stage in ['stage-1', 'stage-2']
@@ -72,6 +73,14 @@ class DINO_LAM(LightningModule):
                 if 'vq' in key or 'action_latent' in key:
                     stage1_ckpt[key.replace("lam.", "")] = lam_ckpt[key]
             self.lam.load_state_dict(stage1_ckpt, strict=False)
+        
+        if stage_two_ckpt and path.exists(stage_two_ckpt) and stage == 'stage-2':
+            print("Loading stage-2 checkpoint:", stage_two_ckpt)
+            lam_ckpt = torch.load(stage_two_ckpt)['state_dict']
+            stage2_ckpt = {}
+            for key in lam_ckpt.keys():
+                stage2_ckpt[key.replace("lam.", "")] = lam_ckpt[key]
+            self.lam.load_state_dict(stage2_ckpt, strict=False) # load all weights in stage-2 finetuning
 
 
         self.lam_num_latents = lam_num_latents
@@ -246,6 +255,7 @@ class DINO_LAM_MultiView(LightningModule):
             optimizer: OptimizerCallable = AdamW,
             make_data_pair: bool = False,
             stage_one_ckpt: str = None,
+            stage_two_ckpt: str = None,
     ) -> None:
         super(DINO_LAM_MultiView, self).__init__()
         assert stage in ['stage-1', 'stage-2']
@@ -275,6 +285,14 @@ class DINO_LAM_MultiView(LightningModule):
                 if 'vq' in key or 'action_latent' in key:
                     stage1_ckpt[key.replace("lam.", "")] = lam_ckpt[key]
             self.lam.load_state_dict(stage1_ckpt, strict=False)
+        
+        if stage_two_ckpt and path.exists(stage_two_ckpt) and stage == 'stage-2':
+            print("Loading stage-2 checkpoint:", stage_two_ckpt)
+            lam_ckpt = torch.load(stage_two_ckpt)['state_dict']
+            stage2_ckpt = {}
+            for key in lam_ckpt.keys():
+                stage2_ckpt[key.replace("lam.", "")] = lam_ckpt[key]
+            self.lam.load_state_dict(stage2_ckpt, strict=False) # load all weights in stage-2 finetuning
 
 
         self.lam_num_latents = lam_num_latents
