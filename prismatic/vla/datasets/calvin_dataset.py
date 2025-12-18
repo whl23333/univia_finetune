@@ -459,13 +459,27 @@ class BaseCalvinDataset(Dataset):
         initial_pixel_values = self.image_transform_lam(self.resize_img(image_vla))
         target_pixel_values = self.image_transform_lam(self.resize_img(goal_image))
 
+        # add gripper image for lam
+        image_gripper = copy.deepcopy(sequence["rgb_obs"]["rgb_gripper"].numpy())
+        image_gripper_vla = Image.fromarray(image_gripper[extra_frame_num].astype(np.uint8))
+        goal_image_gripper = Image.fromarray(image_gripper[-1].astype(np.uint8))
+        initial_pixel_values_gripper = self.image_transform_lam(self.resize_img(image_gripper_vla))
+        target_pixel_values_gripper = self.image_transform_lam(self.resize_img(goal_image_gripper))
+
         # Prepare history frame inputs for the latent action model (to label history latent actions)
         initial_pixel_values_hist, target_pixel_values_hist = None, None
+        initial_pixel_values_hist_gripper, target_pixel_values_hist_gripper = None, None
         if extra_frame_num > 0:
             hist_frame_prev = Image.fromarray(image[0].astype(np.uint8))
             hist_frame_goal = Image.fromarray(image[self.min_window_size].astype(np.uint8))
             initial_pixel_values_hist = self.image_transform_lam(self.resize_img(hist_frame_prev))
             target_pixel_values_hist = self.image_transform_lam(self.resize_img(hist_frame_goal))
+
+            # gripper view
+            hist_frame_prev_gripper = Image.fromarray(image_gripper[0].astype(np.uint8))
+            hist_frame_goal_gripper = Image.fromarray(image_gripper[0].astype(np.uint8))
+            initial_pixel_values_hist_gripper = self.image_transform_lam(self.resize_img(hist_frame_prev_gripper))
+            target_pixel_values_hist_gripper = self.image_transform_lam(self.resize_img(hist_frame_goal_gripper))
 
         # Get proprio states (not used by the current version of UniVLA)
         proprio = torch.tensor(sequence['robot_obs'].numpy())
@@ -481,7 +495,10 @@ class BaseCalvinDataset(Dataset):
 
         return dict(pixel_values=pixel_values, initial_pixel_values=initial_pixel_values, target_pixel_values=target_pixel_values, 
                     initial_pixel_values_hist=initial_pixel_values_hist, target_pixel_values_hist=target_pixel_values_hist,
-                    dataset_name=dataset_name, actions=action, lang=instruction, proprio=proprio)
+                    dataset_name=dataset_name, actions=action, lang=instruction, proprio=proprio, 
+                    initial_pixel_values_gripper=initial_pixel_values_gripper, target_pixel_values_gripper=target_pixel_values_gripper,
+                    initial_pixel_values_hist_gripper=initial_pixel_values_hist_gripper, target_pixel_values_hist_gripper=target_pixel_values_hist_gripper,
+                    )
 
 
     def _get_sequences(self, idx: int, window_size: int, head: bool=False) -> Dict:

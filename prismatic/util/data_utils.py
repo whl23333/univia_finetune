@@ -283,15 +283,28 @@ class PaddedCollatorForActionPrediction_CALVIN:
         target_pixel_values = [instance["target_pixel_values"] for instance in instances]
 
         initial_pixel_values_hist, target_pixel_values_hist = [], []
+        # Optional gripper-view tensors (multi-view)
+        has_gripper = "initial_pixel_values_gripper" in instances[0]
+        initial_pixel_values_gripper = []
+        target_pixel_values_gripper = []
+        initial_pixel_values_hist_gripper, target_pixel_values_hist_gripper = [], []
         with_hist = []
         for instance in instances:
             if instance["initial_pixel_values_hist"] is not None:
                 initial_pixel_values_hist.append(instance["initial_pixel_values_hist"])
                 target_pixel_values_hist.append(instance["target_pixel_values_hist"])
+                if has_gripper:
+                    # History for gripper view if provided by dataset
+                    initial_pixel_values_hist_gripper.append(instance.get("initial_pixel_values_hist_gripper"))
+                    target_pixel_values_hist_gripper.append(instance.get("target_pixel_values_hist_gripper"))
                 with_hist.append(torch.tensor(True))
             else:
                 with_hist.append(torch.tensor(False))     
 
+        # Per-sample current/goal gripper frames (if present)
+        if has_gripper:
+            initial_pixel_values_gripper = [instance["initial_pixel_values_gripper"] for instance in instances]
+            target_pixel_values_gripper = [instance["target_pixel_values_gripper"] for instance in instances]
 
 
         pixel_values = [instance["pixel_values"] for instance in instances]
@@ -320,6 +333,19 @@ class PaddedCollatorForActionPrediction_CALVIN:
         target_pixel_values = torch.stack(target_pixel_values)
         initial_pixel_values_hist = torch.stack(initial_pixel_values_hist) if len(initial_pixel_values_hist) > 0 else []
         target_pixel_values_hist = torch.stack(target_pixel_values_hist) if len(target_pixel_values_hist) > 0 else []
+        if has_gripper:
+            initial_pixel_values_gripper = torch.stack(initial_pixel_values_gripper)
+            target_pixel_values_gripper = torch.stack(target_pixel_values_gripper)
+            initial_pixel_values_hist_gripper = (
+                torch.stack(initial_pixel_values_hist_gripper)
+                if len(initial_pixel_values_hist_gripper) > 0
+                else []
+            )
+            target_pixel_values_hist_gripper = (
+                torch.stack(target_pixel_values_hist_gripper)
+                if len(target_pixel_values_hist_gripper) > 0
+                else []
+            )
         with_hist = torch.stack(with_hist)
 
         output = dict(
@@ -336,6 +362,15 @@ class PaddedCollatorForActionPrediction_CALVIN:
             actions=actions,
             proprio=proprio
         )
+        if has_gripper:
+            output.update(
+                dict(
+                    initial_pixel_values_gripper=initial_pixel_values_gripper,
+                    target_pixel_values_gripper=target_pixel_values_gripper,
+                    initial_pixel_values_hist_gripper=initial_pixel_values_hist_gripper,
+                    target_pixel_values_hist_gripper=target_pixel_values_hist_gripper,
+                )
+            )
         if dataset_names is not None:
             output["dataset_names"] = dataset_names
         return output

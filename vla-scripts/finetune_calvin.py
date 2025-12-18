@@ -13,6 +13,7 @@ from torch.nn.utils.rnn import pad_sequence
 import tqdm
 from ema_pytorch import EMA
 from accelerate import PartialState, Accelerator, DistributedDataParallelKwargs
+from accelerate import DeepSpeedPlugin
 from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim import AdamW
@@ -82,6 +83,7 @@ class Wrapped_Model(torch.nn.Module):
                 pixel_values=batch["pixel_values"],
                 labels=batch["labels"],
                 output_hidden_states = True,        # Return intermediate tokens of all layers
+                use_cache=False,                    # Disable KV cache during training to save memory
             )
         loss, loss_one_step, latent_action_tokens = self.action_decoder_forward(batch, vla_output)
 
@@ -351,16 +353,28 @@ def finetune(cfg: FinetuneConfig) -> None:
                 batch["pixel_values"] = batch["pixel_values"].to(torch.bfloat16).to(device_id)
                 batch['actions'] = batch['actions'].to(device_id)
                 batch['proprio'] = batch['proprio'].to(device_id)
+                batch["initial_pixel_values_gripper"] = batch["initial_pixel_values_gripper"].to(device_id)
+                batch["target_pixel_values_gripper"] = batch["target_pixel_values_gripper"].to(device_id)
 
                 if len(batch["initial_pixel_values_hist"]) > 1:
                     batch["initial_pixel_values_hist"] = batch["initial_pixel_values_hist"].to(device_id)
                     batch["target_pixel_values_hist"] = batch["target_pixel_values_hist"].to(device_id)
+                    batch["initial_pixel_values_hist_gripper"] = batch["initial_pixel_values_hist_gripper"].to(device_id)
+                    batch["target_pixel_values_hist_gripper"] = batch["target_pixel_values_hist_gripper"].to(device_id)
 
                     with torch.no_grad():
                         video = torch.stack([batch["initial_pixel_values"], batch["target_pixel_values"]], dim=1)
-                        latent_action_idx_batch = latent_action_model.module.vq_encode(video)['indices'].squeeze()
+                        video_gripper = torch.stack([batch["initial_pixel_values_gripper"], batch["target_pixel_values_gripper"]], dim=1)
+                        if cfg.multiview:
+                            latent_action_idx_batch = latent_action_model.module.vq_encode(video, video_gripper)['indices'].squeeze()
+                        else:
+                            latent_action_idx_batch = latent_action_model.module.vq_encode(video)['indices'].squeeze()
                         video = torch.stack([batch["initial_pixel_values_hist"], batch["target_pixel_values_hist"]], dim=1)
-                        latent_action_idx_history = latent_action_model.module.vq_encode(video)['indices'].squeeze()
+                        video_gripper = torch.stack([batch["initial_pixel_values_hist_gripper"], batch["target_pixel_values_hist_gripper"]], dim=1)
+                        if cfg.multiview:
+                            latent_action_idx_history = latent_action_model.module.vq_encode(video, video_gripper)['indices'].squeeze()
+                        else:
+                            latent_action_idx_history = latent_action_model.module.vq_encode(video)['indices'].squeeze()
 
                     input_ids_list = []
                     labels_list = []
@@ -410,7 +424,11 @@ def finetune(cfg: FinetuneConfig) -> None:
                 else:
                     with torch.no_grad():
                         video = torch.stack([batch["initial_pixel_values"], batch["target_pixel_values"]], dim=1)
-                        latent_action_idx_batch = latent_action_model.module.vq_encode(video)['indices'].squeeze()
+                        video_gripper = torch.stack([batch["initial_pixel_values_gripper"], batch["target_pixel_values_gripper"]], dim=1)
+                        if cfg.multiview:
+                            latent_action_idx_batch = latent_action_model.module.vq_encode(video, video_gripper)['indices'].squeeze()
+                        else:
+                            latent_action_idx_batch = latent_action_model.module.vq_encode(video)['indices'].squeeze()
 
                     input_ids_list = []
                     labels_list = []
@@ -471,7 +489,7 @@ def finetune(cfg: FinetuneConfig) -> None:
                 normalized_loss.backward()
 
                 # Compute Accuracy and L1 Loss for Logging
-                action_logits = output.logits[:, wrapped_model.module.vla.vision_backbone.featurizer.patch_embed.num_patches : -1]
+                action_logits = output.logits.detach()[:, wrapped_model.module.vla.vision_backbone.featurizer.patch_embed.num_patches : -1]
                 action_preds = action_logits.argmax(dim=2)
                 action_gt = batch["labels"][:, 1:].to(action_preds.device)
                 mask = action_gt > 32000
